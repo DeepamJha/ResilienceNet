@@ -1,10 +1,12 @@
-import { RedisClientType } from 'redis';
-
 export type Priority = 'critical' | 'high' | 'normal';
 const priorities: Priority[] = ['critical', 'high', 'normal'];
+type RedisQueueClient = {
+  rPush(key: string, value: string): Promise<number>;
+  lPop(key: string): Promise<string | null>;
+};
 
 export class PriorityQueue {
-  constructor(private readonly redis: RedisClientType, private readonly prefix = 'resiliencenet') {}
+  constructor(private readonly redis: RedisQueueClient, private readonly prefix = 'resiliencenet') {}
 
   async enqueue(priority: Priority, payload: unknown, attempts = 0): Promise<void> {
     await this.redis.rPush(`${this.prefix}:queue:${priority}`, JSON.stringify({ payload, attempts }));

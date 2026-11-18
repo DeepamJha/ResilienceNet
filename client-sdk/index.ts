@@ -1,6 +1,7 @@
 type OutboxEvent = { id: string; payload: unknown; createdAt: string };
 export class ResilienceNetClient {
   private readonly database: Promise<IDBDatabase>;
+  private retryDelay = 1000;
   constructor(private readonly endpoint: string, private readonly batchSize = 50) {
     this.database = new Promise((resolve, reject) => {
       const request = indexedDB.open('resiliencenet-outbox', 1);
@@ -33,6 +34,10 @@ export class ResilienceNetClient {
       const transaction = db.transaction('events', 'readwrite');
       events.forEach((event) => transaction.objectStore('events').delete(event.id));
       await new Promise<void>((resolve, reject) => { transaction.oncomplete = () => resolve(); transaction.onerror = () => reject(transaction.error); });
-    } catch { setTimeout(() => void this.flush(), 1000); }
+      this.retryDelay = 1000;
+    } catch {
+      setTimeout(() => void this.flush(), this.retryDelay);
+      this.retryDelay = Math.min(this.retryDelay * 2, 60_000);
+    }
   }
 }

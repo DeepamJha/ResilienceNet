@@ -11,22 +11,25 @@ export function buildServer() {
   const redis = createClient({ url: config.redisUrl });
   const queue = new PriorityQueue(redis);
   app.addContentTypeParser('application/json', { parseAs: 'string' }, (_request, body, done) => {
-    try { done(null, JSON.parse(body as string)); } catch (error) { done(error as Error, undefined); }
+    done(null, body);
   });
   app.post('/webhooks/:source', async (request, reply) => {
-    const raw = JSON.stringify(request.body);
+    const raw = request.body as string;
     const signature = request.headers['x-webhook-signature'];
     const idempotencyKey = request.headers['idempotency-key'];
     if (typeof signature !== 'string' || typeof idempotencyKey !== 'string' ||
         !verifySignature(raw, signature, config.webhookSecret)) {
       return reply.code(401).send({ error: 'invalid signature or idempotency key' });
     }
-    const result = await ingestEvent(wal, idempotencyKey, request.body, signature);
+    let payload: unknown;
+    try { payload = JSON.parse(raw); } catch { return reply.code(400).send({ error: 'invalid JSON' }); }
+    const result = await ingestEvent(wal, idempotencyKey, payload, signature);
     await queue.enqueue('normal', { source: request.params, id: result.id });
     return reply.code(result.duplicate ? 200 : 202).send(result);
   });
   app.post('/webhooks/sync', async (request, reply) => {
-    const body = request.body as { events?: Array<{ id: string; payload: unknown; signature: string }> };
+    let body: { events?: Array<{ id: string; payload: unknown; signature: string }> };
+    try { body = JSON.parse(request.body as string); } catch { return reply.code(400).send({ error: 'invalid JSON' }); }
     if (!Array.isArray(body.events)) return reply.code(400).send({ error: 'events must be an array' });
     return syncBatch(wal, body.events);
   });

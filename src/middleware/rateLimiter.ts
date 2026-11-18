@@ -1,5 +1,3 @@
-import { RedisClientType } from 'redis';
-
 export const slidingWindowScript = `
 local now = tonumber(ARGV[1])
 local window = tonumber(ARGV[2])
@@ -12,7 +10,9 @@ redis.call('PEXPIRE', KEYS[1], window)
 return {1, count + 1}
 `;
 
-export async function allowRequest(redis: RedisClientType, key: string, limit: number, windowMs: number): Promise<boolean> {
+type RedisEvalClient = { eval(script: string, options: { keys: string[]; arguments: string[] }): Promise<unknown> };
+
+export async function allowRequest(redis: RedisEvalClient, key: string, limit: number, windowMs: number): Promise<boolean> {
   const result = await redis.eval(slidingWindowScript, {
     keys: [`ratelimit:${key}`],
     arguments: [String(Date.now()), String(windowMs), String(limit), `${Date.now()}-${Math.random()}`]
