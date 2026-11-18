@@ -4,6 +4,7 @@ import { config } from './config.js';
 import { verifySignature, ingestEvent, syncBatch } from './gateway/ingestion.js';
 import { WriteAheadLog } from './gateway/wal.js';
 import { PriorityQueue } from './queue/priorityQueue.js';
+import { allowRequest } from './middleware/rateLimiter.js';
 
 export function buildServer() {
   const app = Fastify({ logger: true });
@@ -14,6 +15,9 @@ export function buildServer() {
     done(null, body);
   });
   app.post('/webhooks/:source', async (request, reply) => {
+    if (!(await allowRequest(redis, `webhook:${request.params}`, 100, 60_000))) {
+      return reply.code(429).send({ error: 'rate limit exceeded' });
+    }
     const raw = request.body as string;
     const signature = request.headers['x-webhook-signature'];
     const idempotencyKey = request.headers['idempotency-key'];
@@ -28,6 +32,9 @@ export function buildServer() {
     return reply.code(result.duplicate ? 200 : 202).send(result);
   });
   app.post('/webhooks/sync', async (request, reply) => {
+    if (!(await allowRequest(redis, 'webhook:sync', 20, 60_000))) {
+      return reply.code(429).send({ error: 'rate limit exceeded' });
+    }
     let body: { events?: Array<{ id: string; payload: unknown; signature: string }> };
     try { body = JSON.parse(request.body as string); } catch { return reply.code(400).send({ error: 'invalid JSON' }); }
     if (!Array.isArray(body.events)) return reply.code(400).send({ error: 'events must be an array' });
